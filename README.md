@@ -1,1 +1,1 @@
-# spritesheeteditor.github.io
+# A simple spritesheet cutter and editor!
