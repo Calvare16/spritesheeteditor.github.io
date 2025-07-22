@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Editor & Spritesheet Cutter</title>
+    <style>
+        /* 1. CSS Variables & Theming */
+        :root {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2a2a2a;
+            --bg-tertiary: #3a3a3a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --accent-primary: #00aaff;
+            --accent-secondary: #0088cc;
+            --border-color: #444;
+            --danger-color: #ff4d4d;
+            --success-color: #4dff4d;
+
+            --top-toolbar-height: 50px;
+            --left-sidebar-width: 240px;
+            --right-panel-width: 300px;
+            --transition-speed: 0.3s;
+        }
+
+        .light-mode {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f0f0f0;
+            --bg-tertiary: #e0e0e0;
+            --text-primary: #1a1a1a;
+            --text-secondary: #555555;
+            --border-color: #ccc;
+        }
+
+        /* 2. Base & Layout */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--text-primary);
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            overflow: hidden;
+            transition: background-color var(--transition-speed);
+        }
+
+        body.animations-disabled * {
+            transition: none !important;
+        }
+
+        #app-container {
+            display: grid;
+            grid-template-areas:
+                "toolbar toolbar"
+                "sidebar main";
+            grid-template-rows: var(--top-toolbar-height) 1fr;
+            grid-template-columns: var(--left-sidebar-width) 1fr;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* 3. Main Components */
+        #top-toolbar {
+            grid-area: toolbar;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        #left-sidebar {
+            grid-area: sidebar;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 20px 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+            z-index: 5;
+        }
+
+        #main-content {
+            grid-area: main;
+            background-color: var(--bg-primary);
+            position: relative;
+            overflow: hidden; /* Canvas handles its own "scrolling" via pan */
+        }
+        
+        #editor-canvas {
+            position: absolute;
+            background-color: transparent;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        #cutter-view {
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-primary);
+            display: none; /* Toggled with JS */
+            flex-direction: column;
+        }
+        
+        #cutter-controls {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: var(--bg-secondary);
+            flex-shrink: 0;
+        }
+        
+        #sprite-grid {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 15px;
+        }
+
+        .sprite-preview-item {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        .sprite-preview-item canvas {
+            background-image:
+                linear-gradient(45deg, #444 25%, transparent 25%),
+                linear-gradient(-45deg, #444 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #444 75%),
+                linear-gradient(-45deg, transparent 75%, #444 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            border: 1px solid var(--border-color);
+            max-width: 100%;
+        }
+        .sprite-preview-item p {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* 4. Settings Panel */
+        #settings-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: var(--right-panel-width);
+            height: 100vh;
+            background-color: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            transform: translateX(100%);
+            transition: transform var(--transition-speed) ease-in-out;
+            z-index: 20;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        #settings-panel.open {
+            transform: translateX(0);
+        }
+
+        #settings-panel h2 {
+            margin-bottom: 10px;
+        }
+
+        #keybinds-panel {
+            background-color: var(--bg-tertiary);
+            padding: 15px;
+            border-radius: 4px;
+        }
+        #keybinds-panel ul {
+            list-style: none;
+        }
+        #keybinds-panel li {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        #keybinds-panel code {
+            background-color: var(--bg-primary);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        /* 5. UI Elements & Controls */
+        .btn {
+            padding: 8px 15px;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color var(--transition-speed), border-color var(--transition-speed);
+            font-size: 14px;
+        }
+        .btn:hover { background-color: var(--accent-primary); color: #fff; border-color: var(--accent-secondary); }
+        .btn:disabled { background-color: var(--bg-tertiary); color: var(--text-secondary); cursor: not-allowed; border-color: var(--border-color); }
+        .btn.active { background-color: var(--accent-primary); color: #fff; border-color: var(--accent-secondary); }
+
+        .tool-group { display: flex; flex-direction: column; gap: 10px; }
+        .tool-group label { font-size: 14px; color: var(--text-secondary); margin-bottom: 5px; }
+
+        input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: var(--bg-tertiary); border-radius: 5px; outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; background: var(--accent-primary); border-radius: 50%; cursor: pointer; }
+        input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; background: var(--accent-primary); border-radius: 50%; cursor: pointer; }
+
+        .toggle-switch { display: flex; align-items: center; justify-content: space-between; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--bg-tertiary); transition: var(--transition-speed); border-radius: 26px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: var(--transition-speed); border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent-primary); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        #color-picker { padding: 0; border: none; width: 34px; height: 34px; background: none; cursor: pointer; border: 2px solid var(--border-color); border-radius: 50%;}
+        #color-picker::-webkit-color-swatch { border: none; border-radius: 50%; padding: 2px; }
+        #color-picker::-moz-color-swatch { border: none; border-radius: 50%; padding: 2px; }
+        
+        #selection-outline {
+            position: absolute;
+            border: 1px dashed var(--accent-primary);
+            pointer-events: none;
+            display: none;
+        }
+
+        #tool-cursor-preview {
+            position: fixed;
+            border-radius: 50%;
+            pointer-events: none;
+            display: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body class="dark-mode">
+
+    <div id="app-container">
+        <header id="top-toolbar">
+            <input type="file" id="upload-input" accept="image/*" style="display: none;">
+            <button id="upload-btn" class="btn">Upload Image</button>
+            <button id="undo-btn" class="btn" disabled>Undo</button>
+            <button id="redo-btn" class="btn" disabled>Redo</button>
+            <span style="width: 1px; height: 60%; background: var(--border-color);"></span>
+            <button id="reset-zoom-btn" class="btn" disabled>Reset View</button>
+            <button id="download-png-btn" class="btn" disabled>Download PNG</button>
+            <span style="width: 1px; height: 60%; background: var(--border-color);"></span>
+            <label for="editor-cutter-toggle" style="font-size: 14px;">Mode:</label>
+            <button id="editor-cutter-toggle" class="btn active" disabled>Editor</button>
+            <div style="flex-grow: 1;"></div>
+            <input type="color" id="color-picker" value="#ff0000">
+            <button id="settings-btn" class="btn">Settings</button>
+        </header>
+
+        <aside id="left-sidebar">
+            <div class="tool-group">
+                <label>Tools</label>
+                <button id="tool-brush" class="btn tool-btn active" data-tool="brush">Brush</button>
+                <button id="tool-eraser" class="btn tool-btn" data-tool="eraser">Eraser</button>
+                <button id="tool-color-remove" class="btn tool-btn" data-tool="color-remove">Color Remover</button>
+                <button id="tool-selection" class="btn tool-btn" data-tool="selection">Selection</button>
+            </div>
+            
+            <div id="tool-options">
+                <div class="tool-group options-brush">
+                    <label for="brush-size">Brush Size: <span id="brush-size-label">10</span>px</label>
+                    <input type="range" id="brush-size" min="1" max="100" value="10">
+                </div>
+                <div class="tool-group options-eraser" style="display:none;">
+                    <label for="eraser-size">Eraser Size: <span id="eraser-size-label">20</span>px</label>
+                    <input type="range" id="eraser-size" min="1" max="100" value="20">
+                </div>
+                <div class="tool-group options-color-remove" style="display:none;">
+                    <label for="color-remove-intensity">Tolerance: <span id="color-remove-intensity-label">30</span></label>
+                    <input type="range" id="color-remove-intensity" min="0" max="255" value="30">
+                    <button id="color-remove-apply-btn" class="btn">Remove Color from Image</button>
+                </div>
+                <div class="tool-group options-selection" style="display:none;">
+                    <label>Selection Mode</label>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="radio" id="select-box" name="selection-mode" value="box" checked>
+                        <label for="select-box" style="margin-bottom: 0;">Box</label>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="radio" id="select-connected" name="selection-mode" value="connected">
+                        <label for="select-connected" style="margin-bottom: 0;">Connected Pixels</label>
+                    </div>
+                    <button id="clear-selection-btn" class="btn" disabled>Clear Selection</button>
+                </div>
+            </div>
+        </aside>
+
+        <main id="main-content">
+            <canvas id="editor-canvas"></canvas>
+            <div id="selection-outline"></div>
+            <div id="tool-cursor-preview"></div>
+            <div id="cutter-view">
+                <div id="cutter-controls">
+                    <button id="detect-sprites-btn" class="btn">Detect Sprites</button>
+                    <button id="download-all-sprites-btn" class="btn" disabled>Download All (.zip)</button>
+                    <span id="sprite-detection-status" style="margin-left: 10px; font-size: 14px; color: var(--text-secondary);"></span>
+                </div>
+                <div id="sprite-grid"></div>
+            </div>
+        </main>
+    </div>
+
+    <div id="settings-panel">
+        <h2>Settings</h2>
+        <div class="toggle-switch">
+            <span>Dark Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="theme-toggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="toggle-switch">
+            <span>UI Animations</span>
+            <label class="switch">
+                <input type="checkbox" id="animations-toggle" checked>
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="tool-group">
+            <label for="zoom-sensitivity">Zoom Sensitivity: <span id="zoom-sensitivity-label">1</span></label>
+            <input type="range" id="zoom-sensitivity" min="0.1" max="3" step="0.1" value="1">
+        </div>
+        <div class="tool-group">
+            <label for="scroll-sensitivity">Pan Sensitivity: <span id="scroll-sensitivity-label">1</span></label>
+            <input type="range" id="scroll-sensitivity" min="1" max="50" step="1" value="1">
+        </div>
+        <div id="keybinds-panel">
+            <h4>Keybinds</h4>
+            <hr style="border-color: var(--border-color); margin: 10px 0;">
+            <ul>
+                <li><span>Undo</span><code>Ctrl + Z</code></li>
+                <li><span>Redo</span><code>Ctrl + Y</code></li>
+                <li><span>Delete Selection</span><code>Del</code></li>
+                <li><span>Zoom</span><code>Ctrl + Scroll</code></li>
+                <li><span>Horizontal Pan</span><code>Alt + Scroll</code></li>
+                <li><span>Vertical Pan</span><code>Scroll</code></li>
+            </ul>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    // --- Helper functions for ZIP creation (from user's example, adapted for binary data) ---
+    function intToBytesLE(num, length) {
+        const bytes = [];
+        for (let i = 0; i < length; i++) {
+            bytes.push(num & 0xff);
+            num >>= 8;
+        }
+        return bytes;
+    }
+
+    function createMinimalZip(files) {
+        let zipParts = [];
+        let centralDirectory = [];
+        let offset = 0;
+
+        files.forEach((file, i) => {
+            // file.content is expected to be a Uint8Array for binary files
+            const fileContentBytes = file.content; 
+            const fileName = file.name;
+            const fileNameBytes = new TextEncoder().encode(fileName); // Filename is always text
+
+            // Local file header
+            const localFileHeader = [
+                0x50, 0x4b, 0x03, 0x04, // Local file header signature
+                0x14, 0x00, // Version needed to extract (2.0)
+                0x00, 0x00, // General purpose bit flag (no compression, no encryption)
+                0x00, 0x00, // Compression method (0 = store)
+                0x00, 0x00, // Last mod time (dummy)
+                0x00, 0x00, // Last mod date (dummy)
+                0x00, 0x00, 0x00, 0x00, // CRC-32 (dummy, not calculated for simplicity)
+                ...intToBytesLE(fileContentBytes.length, 4), // Compressed size
+                ...intToBytesLE(fileContentBytes.length, 4), // Uncompressed size
+                ...intToBytesLE(fileNameBytes.length, 2), // Filename length
+                0x00, 0x00 // Extra field length
+            ];
+
+            const header = new Uint8Array(localFileHeader.length + fileNameBytes.length);
+            header.set(localFileHeader);
+            header.set(fileNameBytes, localFileHeader.length);
+
+            zipParts.push(header);
+            zipParts.push(fileContentBytes); // Push the actual binary content
+
+            // Central file header
+            const centralHeader = [
+                0x50, 0x4b, 0x01, 0x02, // Central file header signature
+                0x14, 0x00, // Version made by
+                0x14, 0x00, // Version needed to extract
+                0x00, 0x00, // General purpose bit flag
+                0x00, 0x00, // Compression method
+                0x00, 0x00, // Last mod time
+                0x00, 0x00, // Last mod date
+                0x00, 0x00, 0x00, 0x00, // CRC-32
+                ...intToBytesLE(fileContentBytes.length, 4), // Compressed size
+                ...intToBytesLE(fileContentBytes.length, 4), // Uncompressed size
+                ...intToBytesLE(fileNameBytes.length, 2), // File name length
+                0x00, 0x00, // Extra field length
+                0x00, 0x00, // File comment length
+                0x00, 0x00, // Disk number
+                0x00, 0x00, // Internal file attributes
+                0x00, 0x00, 0x00, 0x00, // External file attributes
+                ...intToBytesLE(offset, 4) // Offset of local header
+            ];
+
+            const central = new Uint8Array(centralHeader.length + fileNameBytes.length);
+            central.set(centralHeader);
+            central.set(fileNameBytes, centralHeader.length);
+
+            centralDirectory.push(central);
+
+            offset += header.length + fileContentBytes.length;
+        });
+
+        const centralSize = centralDirectory.reduce((sum, part) => sum + part.length, 0);
+        const centralOffset = offset;
+
+        const endOfCentralDir = [
+            0x50, 0x4b, 0x05, 0x06, // End of central dir signature
+            0x00, 0x00, // Number of this disk
+            0x00, 0x00, // Disk where central directory starts
+            ...intToBytesLE(files.length, 2), // Number of central directory records on this disk
+            ...intToBytesLE(files.length, 2), // Total number of central dir records
+            ...intToBytesLE(centralSize, 4), // Size of central directory
+            ...intToBytesLE(centralOffset, 4), // Offset of central directory
+            0x00, 0x00 // Comment length
+        ];
+
+        return new Blob([...zipParts, ...centralDirectory, new Uint8Array(endOfCentralDir)], { type: "application/zip" });
+    }
+    // --- End of ZIP helper functions ---
+
+
+    // --- DOM Elements ---
+    const dom = {
+        body: document.body,
+        canvas: document.getElementById('editor-canvas'),
+        ctx: document.getElementById('editor-canvas').getContext('2d', { willReadFrequently: true }),
+        mainContent: document.getElementById('main-content'),
+        uploadBtn: document.getElementById('upload-btn'),
+        uploadInput: document.getElementById('upload-input'),
+        undoBtn: document.getElementById('undo-btn'),
+        redoBtn: document.getElementById('redo-btn'),
+        resetZoomBtn: document.getElementById('reset-zoom-btn'),
+        downloadPngBtn: document.getElementById('download-png-btn'),
+        settingsBtn: document.getElementById('settings-btn'),
+        settingsPanel: document.getElementById('settings-panel'),
+        themeToggle: document.getElementById('theme-toggle'),
+        animationsToggle: document.getElementById('animations-toggle'),
+        toolBtns: document.querySelectorAll('.tool-btn'),
+        toolOptions: document.getElementById('tool-options'),
+        colorPicker: document.getElementById('color-picker'),
+        selectionOutline: document.getElementById('selection-outline'),
+        clearSelectionBtn: document.getElementById('clear-selection-btn'),
+        toolCursorPreview: document.getElementById('tool-cursor-preview'),
+        editorCutterToggle: document.getElementById('editor-cutter-toggle'),
+        cutterView: document.getElementById('cutter-view'),
+        spriteGrid: document.getElementById('sprite-grid'),
+        detectSpritesBtn: document.getElementById('detect-sprites-btn'),
+        downloadAllSpritesBtn: document.getElementById('download-all-sprites-btn'),
+        spriteDetectionStatus: document.getElementById('sprite-detection-status'),
+    };
+    
+    // --- App State ---
+    const state = {
+        currentTool: 'brush', // brush, eraser, color-remove, selection
+        currentColor: '#ff0000',
+        brushSize: 10,
+        eraserSize: 20,
+        colorRemoveIntensity: 30,
+        selectionMode: 'box', // box, connected
+        isDrawing: false,
+        lastPos: { x: 0, y: 0 },
+        
+        image: null,
+        originalImageData: null, // For cutter and resets
+        
+        transform: {
+            scale: 1,
+            panX: 0,
+            panY: 0,
+        },
+        
+        selection: null, // { x, y, width, height } for box, or an ImageData mask for connected
+        
+        undoStack: [],
+        redoStack: [],
+        MAX_HISTORY: 50,
+        
+        settings: {
+            zoomSensitivity: 1,
+            scrollSensitivity: 1,
+        }
+    };
+
+    // --- Undo/Redo ---
+    function pushState(imageData) {
+        state.undoStack.push(imageData);
+        if (state.undoStack.length > state.MAX_HISTORY) {
+            state.undoStack.shift();
+        }
+        state.redoStack = [];
+        updateUndoRedoButtons();
+    }
+    
+    function undo() {
+        if (state.undoStack.length <= 1) return; // Keep initial state
+        const lastState = state.undoStack.pop();
+        state.redoStack.push(lastState);
+        const prevState = state.undoStack[state.undoStack.length - 1];
+        dom.ctx.putImageData(prevState, 0, 0);
+        updateUndoRedoButtons();
+    }
+
+    function redo() {
+        if (state.redoStack.length === 0) return;
+        const nextState = state.redoStack.pop();
+        state.undoStack.push(nextState);
+        dom.ctx.putImageData(nextState, 0, 0);
+        updateUndoRedoButtons();
+    }
+
+    function updateUndoRedoButtons() {
+        dom.undoBtn.disabled = state.undoStack.length <= 1;
+        dom.redoBtn.disabled = state.redoStack.length === 0;
+    }
+
+    // --- Canvas & Drawing ---
+    function drawCanvas() {
+        if (!state.image) return;
+        
+        const { clientWidth, clientHeight } = dom.mainContent;
+        const { scale, panX, panY } = state.transform;
+
+        dom.canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        
+        // Hide selection if panned/zoomed out of view
+        updateSelectionOutline();
+    }
+
+    function resetView() {
+        if (!state.image) return;
+        const { clientWidth, clientHeight } = dom.mainContent;
+        const hRatio = clientWidth / state.image.width;
+        const vRatio = clientHeight / state.image.height;
+        state.transform.scale = Math.min(hRatio, vRatio, 1) * 0.95; // Fit with a little margin
+        
+        state.transform.panX = (clientWidth - dom.canvas.width * state.transform.scale) / 2;
+        state.transform.panY = (clientHeight - dom.canvas.height * state.transform.scale) / 2;
+        
+        drawCanvas();
+    }
+
+    function getMousePos(e) {
+        const rect = dom.canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left) / state.transform.scale,
+            y: (e.clientY - rect.top) / state.transform.scale
+        };
+    }
+    
+    function getCanvasData() {
+        return dom.ctx.getImageData(0, 0, dom.canvas.width, dom.canvas.height);
+    }
+
+    // --- Image Loading ---
+    dom.uploadBtn.addEventListener('click', () => dom.uploadInput.click());
+    dom.uploadInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            state.image = new Image();
+            state.image.onload = () => {
+                // Set canvas to image size
+                dom.canvas.width = state.image.width;
+                dom.canvas.height = state.image.height;
+                dom.ctx.drawImage(state.image, 0, 0);
+                
+                // Store initial state for undo and cutter
+                state.originalImageData = getCanvasData();
+                state.undoStack = [state.originalImageData];
+                state.redoStack = [];
+
+                // Enable UI
+                dom.downloadPngBtn.disabled = false;
+                dom.resetZoomBtn.disabled = false;
+                dom.editorCutterToggle.disabled = false;
+                updateUndoRedoButtons();
+                
+                // Center and fit image
+                resetView();
+                
+                dom.canvas.style.background = `
+                    linear-gradient(45deg, #444 25%, transparent 25%),
+                    linear-gradient(-45deg, #444 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #444 75%),
+                    linear-gradient(-45deg, transparent 75%, #444 75%)`;
+                dom.canvas.style.backgroundSize = `32px 32px`;
+                dom.canvas.style.backgroundPosition = `0 0, 0 16px, 16px -16px, -16px 0px`;
+            };
+            state.image.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // --- Zoom & Pan ---
+    dom.mainContent.addEventListener('wheel', e => {
+        if (!state.image) return;
+        e.preventDefault();
+
+        if (e.ctrlKey) { // Zoom
+            const { scale, panX, panY } = state.transform;
+            const rect = dom.mainContent.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const zoomFactor = (e.deltaY < 0 ? 1.1 : 1 / 1.1) ** state.settings.zoomSensitivity;
+            const newScale = Math.max(0.1, Math.min(scale * zoomFactor, 30));
+
+            // Adjust pan to zoom around cursor
+            state.transform.panX = mouseX - (mouseX - panX) * (newScale / scale);
+            state.transform.panY = mouseY - (mouseY - panY) * (newScale / scale);
+            state.transform.scale = newScale;
+
+        } else if (e.altKey) { // Horizontal Pan
+            state.transform.panX -= e.deltaY * state.settings.scrollSensitivity;
+        } else { // Vertical Pan
+            state.transform.panY -= e.deltaY * state.settings.scrollSensitivity;
+        }
+
+        drawCanvas();
+    });
+    
+    dom.resetZoomBtn.addEventListener('click', resetView);
+
+    // --- Tool Logic ---
+    function activateTool(toolName) {
+        state.currentTool = toolName;
+        dom.toolBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tool === toolName));
+        
+        Object.keys(dom.toolOptions.children).forEach(key => {
+            const el = dom.toolOptions.children[key];
+            el.style.display = el.classList.contains(`options-${toolName}`) ? 'flex' : 'none';
+        });
+
+        clearSelection();
+        updateCursorPreview();
+    }
+
+    dom.toolBtns.forEach(btn => btn.addEventListener('click', () => activateTool(btn.dataset.tool)));
+
+    // Drawing (Brush & Eraser)
+    function drawLine(x0, y0, x1, y1, isErasing = false) {
+        dom.ctx.beginPath();
+        dom.ctx.moveTo(x0, y0);
+        dom.ctx.lineTo(x1, y1);
+        dom.ctx.strokeStyle = state.currentColor;
+        dom.ctx.lineWidth = isErasing ? state.eraserSize : state.brushSize;
+        dom.ctx.lineCap = 'round';
+        dom.ctx.lineJoin = 'round';
+        dom.ctx.globalCompositeOperation = isErasing ? 'destination-out' : 'source-over';
+        dom.ctx.stroke();
+        dom.ctx.globalCompositeOperation = 'source-over'; // Reset
+    }
+    
+    // Color Remove
+    function removeColor() {
+        const imageData = getCanvasData();
+        const data = imageData.data;
+        const [r1, g1, b1] = state.currentColor.match(/\w\w/g).map(x => parseInt(x, 16));
+        const tolerance = state.colorRemoveIntensity;
+
+        for (let i = 0; i < data.length; i += 4) {
+            const r2 = data[i];
+            const g2 = data[i+1];
+            const b2 = data[i+2];
+            
+            const distance = Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+            
+            if (distance <= tolerance) {
+                data[i+3] = 0; // Set alpha to 0
+            }
+        }
+        dom.ctx.putImageData(imageData, 0, 0);
+        pushState(getCanvasData());
+    }
+    document.getElementById('color-remove-apply-btn').addEventListener('click', removeColor);
+
+    // Selection
+    function updateSelectionOutline() {
+        if (!state.selection || state.selection.type !== 'box') {
+            dom.selectionOutline.style.display = 'none';
+            return;
+        }
+        const { x, y, width, height } = state.selection;
+        const { scale, panX, panY } = state.transform;
+        const rect = dom.mainContent.getBoundingClientRect();
+        
+        dom.selectionOutline.style.display = 'block';
+        dom.selectionOutline.style.left = `${panX + (x * scale)}px`;
+        dom.selectionOutline.style.top = `${panY + (y * scale)}px`;
+        dom.selectionOutline.style.width = `${width * scale}px`;
+        dom.selectionOutline.style.height = `${height * scale}px`;
+    }
+
+    function clearSelection() {
+        state.selection = null;
+        updateSelectionOutline();
+        dom.clearSelectionBtn.disabled = true;
+    }
+    dom.clearSelectionBtn.addEventListener('click', clearSelection);
+    
+    function deleteSelection() {
+        if (!state.selection) return;
+        
+        dom.ctx.globalCompositeOperation = 'destination-out';
+        if (state.selection.type === 'box') {
+            const {x, y, width, height} = state.selection;
+            dom.ctx.fillRect(x, y, width, height);
+        } else if (state.selection.type === 'connected') {
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = dom.canvas.width;
+            maskCanvas.height = dom.canvas.height;
+            maskCanvas.getContext('2d').putImageData(state.selection.mask, 0, 0);
+            dom.ctx.drawImage(maskCanvas, 0, 0);
+        }
+        dom.ctx.globalCompositeOperation = 'source-over';
+        
+        pushState(getCanvasData());
+        clearSelection();
+    }
+    
+    function floodFillSelect(startX, startY) {
+        const imageData = getCanvasData();
+        const { width, height, data } = imageData;
+        const selectionMask = new ImageData(width, height);
+        const q = [[startX, startY]];
+        const visited = new Uint8Array(width * height);
+        const startIndex = (startY * width + startX) * 4;
+        
+        if (data[startIndex + 3] === 0) return; // Clicked on transparent pixel
+
+        visited[startY * width + startX] = 1;
+
+        while (q.length > 0) {
+            const [x, y] = q.shift();
+            const idx = (y * width + x) * 4;
+            
+            // Mark pixel in selection mask
+            selectionMask.data[idx] = 255; // R
+            selectionMask.data[idx+1] = 0;   // G
+            selectionMask.data[idx+2] = 128; // B
+            selectionMask.data[idx+3] = 100; // A (for visual feedback)
+
+            // Check neighbors
+            [[x+1, y], [x-1, y], [x, y+1], [x, y-1]].forEach(([nx, ny]) => {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                    const nIdx = ny * width + nx;
+                    if (!visited[nIdx] && data[nIdx * 4 + 3] > 0) { // Not visited & not transparent
+                        visited[nIdx] = 1;
+                        q.push([nx, ny]);
+                    }
+                }
+            });
+        }
+        
+        // This is a complex selection, so we just show a general outline
+        // For a true "marching ants" effect, a path-finding algorithm on the mask border would be needed
+        dom.ctx.save();
+        dom.ctx.globalAlpha = 0.5;
+        dom.ctx.drawImage(createCanvasFromImageData(selectionMask), 0, 0);
+        dom.ctx.restore();
+
+        // Store the actual mask for deletion
+        const deleteMask = new ImageData(width, height);
+        for(let i=0; i < selectionMask.data.length; i+=4) {
+            if (selectionMask.data[i+3] > 0) { // If it was part of the selection
+                deleteMask.data[i] = 255;
+                deleteMask.data[i+1] = 255;
+                deleteMask.data[i+2] = 255;
+                deleteMask.data[i+3] = 255;
+            }
+        }
+
+        state.selection = { type: 'connected', mask: deleteMask };
+        dom.clearSelectionBtn.disabled = false;
+    }
+
+
+    // --- Canvas Mouse Events ---
+    dom.mainContent.addEventListener('mousedown', e => {
+        if (!state.image || e.button !== 0) return;
+        state.isDrawing = true;
+        state.lastPos = getMousePos(e);
+        
+        if (state.currentTool === 'selection' && state.selectionMode === 'box') {
+            state.selection = { type: 'box', x: state.lastPos.x, y: state.lastPos.y, width: 0, height: 0 };
+        }
+    });
+
+    dom.mainContent.addEventListener('mousemove', e => {
+        const pos = getMousePos(e);
+        updateCursorPreview(e);
+        
+        if (!state.isDrawing) return;
+        
+        switch (state.currentTool) {
+            case 'brush':
+            case 'eraser':
+                drawLine(state.lastPos.x, state.lastPos.y, pos.x, pos.y, state.currentTool === 'eraser');
+                state.lastPos = pos;
+                break;
+            case 'selection':
+                if (state.selectionMode === 'box' && state.selection) {
+                    state.selection.width = pos.x - state.selection.x;
+                    state.selection.height = pos.y - state.selection.y;
+                    updateSelectionOutline();
+                }
+                break;
+        }
+    });
+
+    dom.mainContent.addEventListener('mouseup', e => {
+        if (!state.isDrawing) return;
+        state.isDrawing = false;
+        
+        switch (state.currentTool) {
+            case 'brush':
+            case 'eraser':
+                pushState(getCanvasData());
+                break;
+            case 'selection':
+                if (state.selectionMode === 'box') {
+                    // Normalize negative width/height
+                    if (state.selection.width < 0) {
+                        state.selection.x += state.selection.width;
+                        state.selection.width *= -1;
+                    }
+                    if (state.selection.height < 0) {
+                        state.selection.y += state.selection.height;
+                        state.selection.height *= -1;
+                    }
+                    if (state.selection.width < 1 || state.selection.height < 1) {
+                         clearSelection();
+                    } else {
+                        dom.clearSelectionBtn.disabled = false;
+                    }
+                } else if (state.selectionMode === 'connected') {
+                    floodFillSelect(Math.floor(state.lastPos.x), Math.floor(state.lastPos.y));
+                }
+                break;
+        }
+    });
+
+    dom.mainContent.addEventListener('mouseleave', () => {
+        if (state.isDrawing) {
+            state.isDrawing = false;
+            if (state.currentTool === 'brush' || state.currentTool === 'eraser') {
+                 pushState(getCanvasData());
+            }
+        }
+        dom.toolCursorPreview.style.display = 'none';
+    });
+
+    dom.mainContent.addEventListener('mouseenter', updateCursorPreview);
+
+
+    // --- Spritesheet Cutter ---
+    let detectedSprites = [];
+
+    function setView(mode) { // 'editor' or 'cutter'
+        if (mode === 'editor') {
+            dom.cutterView.style.display = 'none';
+            dom.canvas.style.display = 'block';
+            dom.selectionOutline.style.display = state.selection ? 'block' : 'none';
+            dom.editorCutterToggle.textContent = 'Editor';
+            dom.editorCutterToggle.classList.add('active');
+        } else {
+            dom.canvas.style.display = 'none';
+            dom.selectionOutline.style.display = 'none';
+            dom.cutterView.style.display = 'flex';
+            dom.editorCutterToggle.textContent = 'Cutter';
+            dom.editorCutterToggle.classList.remove('active');
+            detectedSprites = [];
+            dom.spriteGrid.innerHTML = '';
+            dom.downloadAllSpritesBtn.disabled = true;
+            dom.spriteDetectionStatus.textContent = '';
+        }
+    }
+    
+    dom.editorCutterToggle.addEventListener('click', () => {
+        const currentMode = dom.editorCutterToggle.classList.contains('active') ? 'cutter' : 'editor';
+        setView(currentMode);
+    });
+    
+    dom.detectSpritesBtn.addEventListener('click', () => {
+        dom.spriteDetectionStatus.textContent = 'Detecting...';
+        dom.spriteGrid.innerHTML = '';
+        detectedSprites = [];
+        // Use a timeout to allow the UI to update before the heavy computation
+        setTimeout(() => {
+            const imageData = getCanvasData();
+            const { width, height, data } = imageData;
+            const visited = new Uint8Array(width * height);
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x;
+                    if (data[idx * 4 + 3] > 0 && !visited[idx]) {
+                        // Found a new, unvisited, non-transparent pixel
+                        const spriteBox = { minX: x, minY: y, maxX: x, maxY: y };
+                        const q = [[x, y]];
+                        visited[idx] = 1;
+                        
+                        while(q.length > 0) {
+                            const [cx, cy] = q.shift();
+
+                            // Update bounds
+                            spriteBox.minX = Math.min(spriteBox.minX, cx);
+                            spriteBox.minY = Math.min(spriteBox.minY, cy);
+                            spriteBox.maxX = Math.max(spriteBox.maxX, cx);
+                            spriteBox.maxY = Math.max(spriteBox.maxY, cy);
+                            
+                            // Check neighbors
+                            [[cx+1, cy], [cx-1, cy], [cx, cy+1], [cx, cy-1]].forEach(([nx, ny]) => {
+                                const nIdx = ny * width + nx;
+                                if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[nIdx] && data[nIdx * 4 + 3] > 0) {
+                                    visited[nIdx] = 1;
+                                    q.push([nx, ny]);
+                                }
+                            });
+                        }
+                        detectedSprites.push({
+                            x: spriteBox.minX,
+                            y: spriteBox.minY,
+                            width: spriteBox.maxX - spriteBox.minX + 1,
+                            height: spriteBox.maxY - spriteBox.minY + 1
+                        });
+                    }
+                }
+            }
+            renderSpriteGrid();
+            dom.spriteDetectionStatus.textContent = `Found ${detectedSprites.length} sprites.`;
+        }, 10);
+    });
+    
+    function renderSpriteGrid() {
+        dom.spriteGrid.innerHTML = '';
+        detectedSprites.forEach((sprite, index) => {
+            const item = document.createElement('div');
+            item.className = 'sprite-preview-item';
+            
+            const previewCanvas = document.createElement('canvas');
+            previewCanvas.width = sprite.width;
+            previewCanvas.height = sprite.height;
+            const tempCtx = previewCanvas.getContext('2d');
+            tempCtx.putImageData(dom.ctx.getImageData(sprite.x, sprite.y, sprite.width, sprite.height), 0, 0);
+
+            const label = document.createElement('p');
+            label.textContent = `Sprite ${index+1} (${sprite.width}x${sprite.height})`;
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.textContent = '⬇️';
+            downloadBtn.className = 'btn';
+            downloadBtn.style.padding = '2px 8px';
+            downloadBtn.onclick = () => downloadDataURL(previewCanvas.toDataURL('image/png'), `sprite_${index+1}.png`);
+            
+            item.appendChild(previewCanvas);
+            item.appendChild(label);
+            item.appendChild(downloadBtn);
+            dom.spriteGrid.appendChild(item);
+        });
+        dom.downloadAllSpritesBtn.disabled = detectedSprites.length === 0;
+    }
+    
+    dom.downloadAllSpritesBtn.addEventListener('click', () => {
+        if (detectedSprites.length === 0) {
+            dom.spriteDetectionStatus.textContent = 'No sprites to download.';
+            return;
+        }
+
+        const filesToZip = [];
+        detectedSprites.forEach((sprite, index) => {
+            const previewCanvas = document.createElement('canvas');
+            previewCanvas.width = sprite.width;
+            previewCanvas.height = sprite.height;
+            const tempCtx = previewCanvas.getContext('2d');
+            tempCtx.putImageData(dom.ctx.getImageData(sprite.x, sprite.y, sprite.width, sprite.height), 0, 0);
+
+            // Get PNG data as Data URL, then convert to base64, then to Uint8Array
+            const dataURL = previewCanvas.toDataURL('image/png');
+            const base64 = dataURL.split(',')[1];
+            const binaryString = atob(base64); // Decode base64 to binary string
+            // Convert binary string to Uint8Array
+            const bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
+
+            filesToZip.push({
+                name: `sprite_${index + 1}.png`,
+                content: bytes // This is now a Uint8Array
+            });
+        });
+
+        const zipBlob = createMinimalZip(filesToZip);
+        downloadDataURL(URL.createObjectURL(zipBlob), 'sprites.zip');
+    });
+
+    // --- General UI & Settings ---
+    dom.settingsBtn.addEventListener('click', () => dom.settingsPanel.classList.toggle('open'));
+    
+    dom.themeToggle.addEventListener('change', (e) => {
+        dom.body.classList.toggle('dark-mode', e.target.checked);
+        dom.body.classList.toggle('light-mode', !e.target.checked);
+    });
+    
+    dom.animationsToggle.addEventListener('change', (e) => {
+        dom.body.classList.toggle('animations-disabled', !e.target.checked);
+    });
+
+    function bindSliderToState(sliderId, labelId, stateKey, stateObject = state, suffix = '') {
+        const slider = document.getElementById(sliderId);
+        const label = document.getElementById(labelId);
+        slider.addEventListener('input', (e) => {
+            stateObject[stateKey] = parseFloat(e.target.value);
+            label.textContent = e.target.value;
+            if (stateKey === 'brushSize' || stateKey === 'eraserSize') {
+                updateCursorPreview({ clientX: 0, clientY: 0 }); // Update preview without real mouse event
+            }
+        });
+        label.textContent = slider.value;
+        stateObject[stateKey] = parseFloat(slider.value);
+    }
+    
+    bindSliderToState('brush-size', 'brush-size-label', 'brushSize');
+    bindSliderToState('eraser-size', 'eraser-size-label', 'eraserSize');
+    bindSliderToState('color-remove-intensity', 'color-remove-intensity-label', 'colorRemoveIntensity');
+    bindSliderToState('zoom-sensitivity', 'zoom-sensitivity-label', 'zoomSensitivity', state.settings);
+    bindSliderToState('scroll-sensitivity', 'scroll-sensitivity-label', 'scrollSensitivity', state.settings);
+
+    document.getElementById('color-picker').addEventListener('input', e => state.currentColor = e.target.value);
+    document.querySelectorAll('input[name="selection-mode"]').forEach(radio => {
+        radio.addEventListener('change', e => state.selectionMode = e.target.value);
+    });
+
+    // --- Keyboard Shortcuts ---
+    window.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT') return; // Ignore shortcuts if typing in an input
+        
+        if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+        if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+        if (e.key === 'Delete') { e.preventDefault(); deleteSelection(); }
+    });
+
+    // --- Helpers ---
+    function updateCursorPreview(e) {
+        if (!state.image) return;
+        const preview = dom.toolCursorPreview;
+        const isBrush = state.currentTool === 'brush';
+        const isEraser = state.currentTool === 'eraser';
+
+        if ((isBrush || isEraser) && e) {
+            preview.style.display = 'block';
+            const size = (isBrush ? state.brushSize : state.eraserSize) * state.transform.scale;
+            preview.style.width = `${size}px`;
+            preview.style.height = `${size}px`;
+            preview.style.left = `${e.clientX}px`;
+            preview.style.top = `${e.clientY}px`;
+
+            if (isBrush) {
+                preview.style.background = state.currentColor;
+                preview.style.border = '1px solid #fff';
+            } else { // Eraser
+                preview.style.background = 'transparent';
+                preview.style.border = `2px solid ${dom.body.classList.contains('dark-mode') ? '#fff' : '#000'}`;
+            }
+        } else {
+            preview.style.display = 'none';
+        }
+    }
+    
+    function downloadDataURL(dataURL, filename) {
+        const link = document.createElement('a');
+        link.href = dataURL;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    dom.downloadPngBtn.addEventListener('click', () => {
+        if (!state.image) return;
+        downloadDataURL(dom.canvas.toDataURL('image/png'), 'export.png');
+    });
+
+    function createCanvasFromImageData(imageData) {
+        const canvas = document.createElement('canvas');
+        canvas.width = imageData.width;
+        canvas.height = imageData.height;
+        canvas.getContext('2d').putImageData(imageData, 0, 0);
+        return canvas;
+    }
+    
+    // --- Initial Setup ---
+    function init() {
+        activateTool('brush');
+        setView('editor');
+    }
+    
+    init();
+
+});
+</script>
+
+</body>
+</html>
